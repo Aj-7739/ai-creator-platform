@@ -1,21 +1,18 @@
+// app/api/imagekit/upload/route.js
 import { NextResponse } from "next/server";
-import ImageKit from "imagekit";
 import { auth } from "@clerk/nextjs/server";
-
-// Initialize ImageKit
-const imagekit = new ImageKit({
-  publicKey: process.env.NEXT_PUBLIC_IMAGEKIT_PUBLIC_KEY,
-  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
-  urlEndpoint: process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT,
-});
+import { getImageKit } from "../../../../lib/imagekit-server";
 
 export async function POST(request) {
   try {
-    // Verify authentication
+    // Clerk authentication
     const { userId } = await auth();
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Lazy initialize ImageKit at runtime (safe for Vercel)
+    const imagekit = getImageKit();
 
     // Get form data
     const formData = await request.formData();
@@ -30,36 +27,39 @@ export async function POST(request) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    // Generate unique filename
+    // Build unique filename
     const timestamp = Date.now();
     const sanitizedFileName =
-      fileName?.replace(/[^a-zA-Z0-9.-]/g, "_") || "upload";
+      (fileName && fileName.toString().replace(/[^a-zA-Z0-9.-]/g, "_")) ||
+      "upload";
     const uniqueFileName = `${userId}/${timestamp}_${sanitizedFileName}`;
 
-    // Upload to ImageKit - Simple server-side upload
+    // Upload to ImageKit
     const uploadResponse = await imagekit.upload({
       file: buffer,
       fileName: uniqueFileName,
       folder: "/blog_images",
     });
 
-    // Return upload data
-    return NextResponse.json({
-      success: true,
-      url: uploadResponse.url,
-      fileId: uploadResponse.fileId,
-      width: uploadResponse.width,
-      height: uploadResponse.height,
-      size: uploadResponse.size,
-      name: uploadResponse.name,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        url: uploadResponse.url,
+        fileId: uploadResponse.fileId,
+        width: uploadResponse.width,
+        height: uploadResponse.height,
+        size: uploadResponse.size,
+        name: uploadResponse.name,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("ImageKit upload error:", error);
     return NextResponse.json(
       {
         success: false,
         error: "Failed to upload image",
-        details: error.message,
+        details: error?.message || String(error),
       },
       { status: 500 }
     );
